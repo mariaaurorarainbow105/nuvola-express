@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Nuvola Express</title>
+<style>
+* { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; }
+body { margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; background-color: #29B6F6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
+canvas { background: linear-gradient(#87CEEB, #E0F7FA); box-shadow: 0 0 25px rgba(0,0,0,0.3); border: 5px solid white; border-radius: 20px; max-width: 95vw; max-height: 65vh; }
+#ui-container { position: absolute; top: 10px; text-align: center; color: white; z-index: 10; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); }
+#controls { display: flex; justify-content: space-between; width: 90%; max-width: 400px; margin-top: 15px; gap: 15px; }
+.ctrl-btn { flex: 1; height: 65px; background: rgba(255, 255, 255, 0.25); border: 3px solid white; border-radius: 20px; display: flex; justify-content: center; align-items: center; font-size: 35px; color: white; cursor: pointer; transition: background 0.1s; }
+.ctrl-btn:active { background: rgba(255, 255, 255, 0.5); transform: scale(0.96); }
+#footer { margin-top: 10px; color: white; font-size: 15px; font-weight: bold; opacity: 0.9; }
+#overlay { position: absolute; width: 80%; max-width: 320px; padding: 25px; background: rgba(255, 255, 255, 0.98); display: flex; flex-direction: column; align-items: center; border-radius: 25px; z-index: 20; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+.char-select { display: flex; gap: 20px; margin: 20px 0; }
+.char-box { border: 3px solid #eee; padding: 12px; border-radius: 15px; background: #f9f9f9; transition: 0.2s; display: flex; justify-content: center; align-items: center; }
+.char-box.selected { border-color: #FF5722; background: #fff3e0; transform: scale(1.05); }
+.char-box img { width:50px; height:75px; object-fit:contain; pointer-events:none; }
+#startBtn, #pauseBtn { padding: 16px 35px; font-size: 22px; background: #FF5722; color: white; border: none; border-radius: 50px; font-weight: bold; box-shadow: 0 5px 0 #bf360c; cursor: pointer; margin-top:10px; }
+#startBtn:active, #pauseBtn:active { transform: translateY(2px); box-shadow: 0 3px 0 #bf360c; }
+#compliment { position: absolute; top: 100px; width: 90%; max-width: 350px; text-align: center; font-size: 22px; font-weight: bold; color: #FFD700; text-shadow: 2px 2px 4px #000; opacity: 0; transition: opacity 0.5s; z-index: 15; }
+#lives { font-size: 18px; margin-top: 5px; }
+</style>
+</head>
+<body>
+
+<div id="ui-container">
+    <div id="score" style="font-size: 45px; font-weight: 900;">0</div>
+    <div id="level" style="font-size: 16px; background: rgba(0,0,0,0.1); padding: 2px 10px; border-radius: 10px;">Livello: 1</div>
+    <div id="lives">Vite: 3</div>
+</div>
+
+<div id="compliment"></div>
+
+<div id="overlay">
+    <h1 style="color: #0288D1; margin:0; font-size: 32px; letter-spacing: 1px;">NUVOLA EXPRESS</h1>
+    <p style="font-size: 15px; color: #555; margin-top: 10px;">Scegli il personaggio e salta!</p>
+    <div class="char-select">
+        <div id="btnMan" class="char-box selected" onclick="selectChar('man')">
+            <img src="shiki.png">
+        </div>
+        <div id="btnWoman" class="char-box" onclick="selectChar('woman')">
+            <img src="rebecca.png">
+        </div>
+    </div>
+    <button id="startBtn">GIOCA</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="controls">
+    <div class="ctrl-btn" id="leftBtn">◀</div>
+    <div class="ctrl-btn" id="rightBtn">▶</div>
+</div>
+
+<button id="pauseBtn">PAUSA</button>
+
+<div id="footer">Gioco creato da Maria Aurora</div>
+
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+const scoreText=document.getElementById('score');
+const levelText=document.getElementById('level');
+const overlay=document.getElementById('overlay');
+const startBtn=document.getElementById('startBtn');
+const livesText=document.getElementById('lives');
+const pauseBtn=document.getElementById('pauseBtn');
+const complimentDiv=document.getElementById('compliment');
+
+canvas.width=400; canvas.height=600;
+
+let score=0, level=1, lives=3, gameActive=false, paused=false, selectedGender='man', finalStage=false;
+let basePlatformWidth=90, platformWidth=90, platforms=[];
+const gravity=0.45, jumpStrength=-13;
+const player={x:185,y:450,width:30,height:45,vx:0,vy:0};
+let respawnFlash=0; // nuova variabile per flash
+
+// IMMAGINI
+const imgMan=new Image(); imgMan.src="shiki.png";
+const imgWoman=new Image(); imgWoman.src="rebecca.png";
+const imgCastle=new Image(); imgCastle.src="castello.png";
+
+// AUDIO
+let audioCtx=null, mainGain=null;
+function initAudio(){
+    if(!audioCtx){ audioCtx=new (window.AudioContext || window.webkitAudioContext)(); mainGain=audioCtx.createGain(); mainGain.connect(audioCtx.destination); mainGain.gain.value=0.7; playMusic();}
+    if(audioCtx.state==='suspended') audioCtx.resume();
+}
+function playJumpSound(){ if(!audioCtx) return; const osc=audioCtx.createOscillator(); const g=audioCtx.createGain(); osc.type='square'; osc.frequency.setValueAtTime(300,audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(900,audioCtx.currentTime+0.1); g.gain.setValueAtTime(0.3,audioCtx.currentTime); g.gain.linearRampToValueAtTime(0,audioCtx.currentTime+0.1); osc.connect(g); g.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.1);}
+function playMusic(){ const notes=[329,392,523,392,440,349,329,261]; let noteIdx=0; function next(){ if(gameActive && audioCtx){ const osc=audioCtx.createOscillator(); const g=audioCtx.createGain(); osc.type='triangle'; osc.frequency.value=notes[noteIdx%notes.length]; g.gain.setValueAtTime(0.15,audioCtx.currentTime); g.gain.linearRampToValueAtTime(0,audioCtx.currentTime+0.3); osc.connect(g); g.connect(mainGain); osc.start(); osc.stop(audioCtx.currentTime+0.3); noteIdx++; } setTimeout(next,350);} next();}
+
+// CONTROLLI
+function selectChar(gender){ selectedGender=gender; document.getElementById('btnMan').classList.toggle('selected',gender==='man'); document.getElementById('btnWoman').classList.toggle('selected',gender==='woman'); }
+const leftBtn=document.getElementById('leftBtn');
+const rightBtn=document.getElementById('rightBtn');
+const moveLeft=()=>{if(gameActive && !paused) player.vx=-9.5;};
+const moveRight=()=>{if(gameActive && !paused) player.vx=9.5;};
+const stopMove=()=>{player.vx=0;}
+leftBtn.addEventListener('touchstart',e=>{e.preventDefault(); moveLeft();});
+rightBtn.addEventListener('touchstart',e=>{e.preventDefault(); moveRight();});
+leftBtn.addEventListener('touchend',stopMove);
+rightBtn.addEventListener('touchend',stopMove);
+leftBtn.addEventListener('mousedown',moveLeft);
+rightBtn.addEventListener('mousedown',moveRight);
+window.addEventListener('mouseup',stopMove);
+const keys={};
+window.addEventListener('keydown',e=>{keys[e.code]=true;if(!paused){if(e.code==='ArrowLeft') moveLeft();if(e.code==='ArrowRight') moveRight();}});
+window.addEventListener('keyup',e=>{keys[e.code]=false;if(!keys['ArrowLeft']&&!keys['ArrowRight']) stopMove();});
+
+startBtn.addEventListener('click',()=>{ initAudio(); overlay.style.display='none'; resetGame(); gameActive=true; paused=false; pauseBtn.innerText="PAUSA"; });
+pauseBtn.addEventListener('click',()=>{ paused=!paused; pauseBtn.innerText=paused?"RIPRENDI":"PAUSA"; });
+
+// --- PLATFORMS ---
+function initPlatforms(){ 
+    platforms=[{x:150,y:550,width:100,bounce:0}]; 
+    for(let i=0;i<6;i++){ platforms.push({x:Math.random()*(400-basePlatformWidth),y:i*100,width:basePlatformWidth,bounce:0,castle:false }); } 
+}
+
+// --- COMPLIMENTI ---
+const compliments=["Bravo! 🎉","Fantastico! 🌟","Sei un campione! 🏆","Grande salto! 🚀","Eccellente! 😎"];
+let lastComplimentScore=0;
+function showCompliment(){ complimentDiv.innerText=compliments[Math.floor(Math.random()*compliments.length)]; complimentDiv.style.opacity=1; setTimeout(()=>{complimentDiv.style.opacity=0;},2000); }
+
+// --- UPDATE ---
+function update(){
+    if(!gameActive || paused) return;
+    player.x+=player.vx; player.vy+=gravity; player.y+=player.vy;
+
+    if(player.x>400) player.x=-30;
+    if(player.x<-30) player.x=400;
+
+    if(player.vy>0){
+        platforms.forEach(p=>{
+            if(player.x+25>p.x && player.x+5<p.x+p.width && player.y+45>p.y+5 && player.y+45<p.y+20+player.vy){
+                player.vy=jumpStrength; playJumpSound(); p.bounce=8;
+                if(p.castle){ gameActive=false; setTimeout(()=>{alert(`Complimenti! Hai salvato ${selectedGender==='man'?'la principessa':'il principe'}! 🏰`); overlay.style.display='flex';},500);}
+            }
+        });
+    }
+
+    platforms.forEach(p=>{ if(p.bounce>0) p.bounce*=0.85; else p.bounce=0; });
+
+    if(player.y<250){
+        let diff=250-player.y; player.y=250;
+        platforms.forEach(p=>{
+            p.y+=diff;
+            if(p.y>600 && !p.castle){
+                p.y=0; p.x=Math.random()*(400-platformWidth); p.width=platformWidth; 
+                score++; scoreText.innerText=score;
+                if(score>0 && score%30===0 && score!==lastComplimentScore){ lastComplimentScore=score; showCompliment(); }
+                if(score>0 && score%100===0 && level<3){ level++; levelText.innerText="Livello: "+level; platformWidth-=15; }
+                if(score>=300 && !finalStage){ finalStage=true; platforms.push({x:140,y:100,width:120,bounce:0,castle:true}); }
+            }
+        });
+    }
+
+    // --- Gestione caduta e vite (nuvola più vicina + flash)
+    if(player.y>600){ 
+        lives--; 
+        livesText.innerText="Vite: "+lives;
+
+        if(lives <= 0){ 
+            score=0; scoreText.innerText='0';
+            level=1; levelText.innerText="Livello: 1";
+            lives=3; livesText.innerText="Vite: 3";
+            finalStage=false;
+            resetGame();
+            overlay.style.display='flex';
+        } else { 
+            paused = true;
+            pauseBtn.innerText = "RIPRENDI";
+
+            // Trova piattaforma più vicina sotto il player
+            let nearestPlatform = platforms[0];
+            for(let p of platforms){
+                if(p.y < 600 && Math.abs(player.y - p.y) < Math.abs(player.y - nearestPlatform.y)){
+                    nearestPlatform = p;
+                }
+            }
+            player.x = nearestPlatform.x + nearestPlatform.width/2 - player.width/2;
+            player.y = nearestPlatform.y - player.height;
+            player.vy = 0;
+            player.vx = 0;
+            respawnFlash = 20; // trigger effetto flash
+        }
+    }
+}
+
+// --- DRAW ---
+function drawCloud(x,y,width,bounce){
+    ctx.fillStyle='white'; ctx.beginPath(); 
+    let radius=15; let numCircles=Math.max(3,Math.floor(width/20)); let step=width/(numCircles-1);
+    for(let i=0;i<numCircles;i++){
+        let cx=x+i*step; let cy=y+radius+(Math.sin(i*1.5)*4)-bounce;
+        let r=radius+(Math.sin(i*Math.PI/(numCircles-1))*5);
+        ctx.moveTo(cx+r,cy); ctx.arc(cx,cy,r,0,Math.PI*2);
+    }
+    ctx.fill(); ctx.fillStyle='rgba(0,0,0,0.08)'; ctx.fillRect(x+radius,y+radius*2-width*0.02,width-radius*2,4);
+}
+
+function drawPlayer(){ 
+    const img = selectedGender==='man' ? imgMan : imgWoman; 
+    const jumpOffset = -Math.min(player.vy*1.5,10); 
+    ctx.drawImage(img, player.x, player.y+jumpOffset, player.width, player.height); 
+    
+    if(respawnFlash > 0){
+        ctx.fillStyle = 'rgba(255,255,0,0.4)';
+        ctx.fillRect(player.x, player.y+jumpOffset, player.width, player.height);
+        respawnFlash--;
+    }
+}
+
+function draw(){ 
+    ctx.clearRect(0,0,400,600); 
+    platforms.forEach(p=>{
+        if(p.castle){ ctx.drawImage(imgCastle,p.x,p.y,p.width,80); } 
+        else drawCloud(p.x,p.y,p.width,p.bounce);
+    });
+    drawPlayer(); 
+}
+
+function resetGame(){ player.x=185; player.y=450; player.vy=0; player.vx=0; platformWidth=basePlatformWidth; finalStage=false; initPlatforms(); }
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+initPlatforms(); loop();
+</script>
+
+</body>
+</html>
